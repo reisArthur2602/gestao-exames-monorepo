@@ -1,0 +1,175 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  MEMBER
+}
+
+enum ExamStatus {
+  PENDING
+  REPORTED
+  READY
+  DELIVERED
+}
+
+enum ExamType {
+  DICOM
+  EXTERNAL
+}
+
+enum LogEvent {
+  PatientCreated
+  PatientUpdated
+  ActivationCodeIssued
+  PatientActivated
+  PatientLogin
+  ExamCreated
+  ExamImportedFromOrthanc
+  ExamLinkedToPatient
+  ReportAttached
+  AttachmentAdded
+  ExamReleased
+  ExamViewedByPatient
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(MEMBER)
+  createdAt    DateTime @default(now())
+
+  logs            Log[]
+  activationCodes ActivationCode[]
+}
+
+model Patient {
+  id        String    @id @default(cuid())
+  name      String
+  cpf       String    @unique // digits only
+  phone     String?
+  birthDate DateTime?
+  createdAt DateTime  @default(now())
+
+  auth  PatientAuth?
+  exams Exam[]
+  codes ActivationCode[]
+  logs  Log[]
+}
+
+model PatientAuth {
+  id           String    @id @default(cuid())
+  patientId    String    @unique
+  passwordHash String
+  isActive     Boolean   @default(false)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  patient Patient         @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  devices PatientDevice[]
+}
+
+model PatientDevice {
+  id         String   @id @default(cuid())
+  authId     String
+  deviceId   String // uuid do app (ou fingerprint web)
+  platform   String // "android" | "ios" | "web"
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  auth PatientAuth @relation(fields: [authId], references: [id], onDelete: Cascade)
+
+  @@unique([authId, deviceId])
+}
+
+model ActivationCode {
+  id         String    @id @default(cuid())
+  patientId  String
+  codeHash   String
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+  issuedById String?
+
+  patient  Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  issuedBy User?   @relation(fields: [issuedById], references: [id], onDelete: SetNull)
+
+  @@index([patientId])
+  @@index([expiresAt])
+}
+
+model Exam {
+  id             String     @id @default(cuid())
+  status         ExamStatus @default(PENDING)
+  type           ExamType
+  registry       String?
+  description    String?
+  orthancStudyId String?    @unique
+  performedBy    String?
+  notes          String?
+  createdAt      DateTime   @default(now())
+
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+
+  report      Report?
+  attachments Attachment[]
+  logs        Log[]
+
+  @@index([patientId, createdAt])
+  @@index([status])
+  @@index([type])
+}
+
+model Report {
+  id        String   @id @default(cuid())
+  examId    String   @unique
+  filename  String
+  url       String
+  signedBy  String?
+  createdAt DateTime @default(now())
+
+  exam Exam @relation(fields: [examId], references: [id], onDelete: Cascade)
+}
+
+model Attachment {
+  id        String   @id @default(cuid())
+  examId    String
+  filename  String
+  url       String
+  size      Int
+  createdAt DateTime @default(now())
+
+  exam Exam @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  @@index([examId])
+}
+
+model Log {
+  id        String   @id @default(cuid())
+  event     LogEvent
+  message   String
+  metaJson  Json?
+  createdAt DateTime @default(now())
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  examId String?
+  exam   Exam?   @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  patientId String?
+  patient   Patient? @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([event, createdAt])
+  @@index([patientId])
+  @@index([examId])
+}
